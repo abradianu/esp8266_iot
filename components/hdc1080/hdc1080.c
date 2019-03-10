@@ -51,6 +51,12 @@
 #define HDC1080_DEVICE_ID             0x1050
 #define HDC1080_MANUF_ID              0x5449
 
+/*
+ * Chapter 7.5 Electrical Characteristics
+ * Worst case for conversion time is 6.35 + 6.50 ms
+ */
+#define HDC1080_CONVERSION_TIME      20
+
 static const char *TAG = "HDC1080";
 
 hdc1080_sensor_t* hdc1080_init(uint8_t bus)
@@ -58,12 +64,6 @@ hdc1080_sensor_t* hdc1080_init(uint8_t bus)
     uint8_t reg;
     uint8_t data[2];
     hdc1080_sensor_t* dev;
-    
-    if ((dev = malloc (sizeof(hdc1080_sensor_t))) == NULL)
-        return NULL;
-
-    // init sensor data structure
-    dev->bus  = bus;
 
     reg = HDC1080_REG_MANUF_ID;
     if (i2c_slave_read(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0 ||
@@ -77,12 +77,19 @@ hdc1080_sensor_t* hdc1080_init(uint8_t bus)
         return NULL;
     }
 
+    if ((dev = malloc (sizeof(hdc1080_sensor_t))) == NULL)
+        return NULL;
+
+    /* init sensor data structure */
+    dev->bus  = bus;
+
     reg = HDC1080_REG_CONFIG;
     data[0] =   HDC1080_REG_CONFIG_TRES_14BIT |
                 HDC1080_REG_CONFIG_HRES_11BIT |
                 HDC1080_REG_CONFIG_MODE_BOTH;
     data[1] = 0;
     if (i2c_slave_write(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0) {
+        free(dev);
         return NULL;
     }
 
@@ -109,15 +116,18 @@ esp_err_t hdc1080_read(hdc1080_sensor_t* sensor, float * temp, float * humidity)
         return ESP_FAIL;
     }
 
-    /* Wait for the measurements to complete */
-    vTaskDelay(20 / portTICK_PERIOD_MS);
+    /* 
+     * Wait for the measurements to complete, make sure we do not wait
+     * less than HDC1080_CONVERSION_TIME interval
+     */
+    vTaskDelay((HDC1080_CONVERSION_TIME / portTICK_PERIOD_MS) + 1);
 
     /* Read both temperature and humidity in a single read transaction */
     if (i2c_slave_read(sensor->bus, HDC1080_I2C_ADDRESS, NULL, data, 4) != 0) {
         return ESP_FAIL;
     }
 
-    /* Temp with one decimal */
+    /* Chapters 8.6.1 & 8.6.2 from HDC1080 datasheet */
     *temp = ((float)(165 * ((data[0] << 8) | data[1]))) / (1 << 16) - 40;
     *humidity = (100 * ((data[2] << 8) | data[3])) / (1 << 16);
 
