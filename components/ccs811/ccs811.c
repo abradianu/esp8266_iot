@@ -98,6 +98,12 @@
 #define CCS811_ERR_HEATER_FAULT    0x10  // heater current not in range
 #define CCS811_ERR_HEATER_SUPPLY   0x20  // heater voltage not applied correctly
 
+#define CCS811_WAKE_ASSERTED       0     // nWAKE is an active low input
+#define CCS811_WAKE_DEASSERTED     1     // nWAKE is an active low input
+
+#define CCS811_WAKE_ASSERTED_DELAY   50  // Time until active after nWAKE asserted in us
+#define CCS811_WAKE_DEASSERTED_DELAY 20  // Minimum time nWAKE should be de-asserted in us
+
 /**
  * Type declarations
  */
@@ -120,8 +126,9 @@ static bool ccs811_reg_write(ccs811_sensor_t* dev, uint8_t reg, uint8_t *data, u
 static bool ccs811_check_error_status (ccs811_sensor_t* dev);
 static bool ccs811_enable_threshold (ccs811_sensor_t* dev, bool enabled);
 static bool ccs811_is_available (ccs811_sensor_t* dev);
+static void ccs811_init_gpio (ccs811_sensor_t* dev);
 
-ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr)
+ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr, uint8_t wake_gpio)
 {
     ccs811_sensor_t* dev;
     
@@ -131,8 +138,12 @@ ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr)
     // init sensor data structure
     dev->bus  = bus;
     dev->addr = addr;
+    dev->wake_gpio = wake_gpio;
     dev->mode = ccs811_mode_idle;
     dev->error_code = CCS811_OK;
+
+    if (dev->wake_gpio != CCS811_GPIO_INVALID)
+        ccs811_init_gpio(dev);
 
     // check whether sensor is available including the check of the hardware
     // id and the error state
@@ -448,6 +459,33 @@ bool ccs811_set_baseline (ccs811_sensor_t* dev, uint16_t baseline)
  * FUNCTIONS FOR INTERNAL USE ONLY
  */
 
+static void ccs811_init_gpio (ccs811_sensor_t* dev)
+{
+    gpio_config_t io_conf;
+
+    io_conf.intr_type = GPIO_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = (1 << dev->wake_gpio);
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 0;
+    gpio_config(&io_conf);
+}
+
+static void ccs811_wake_assert (ccs811_sensor_t* dev)
+{
+    if (dev->wake_gpio != CCS811_GPIO_INVALID) {
+        gpio_set_level(dev->wake_gpio, CCS811_WAKE_ASSERTED);
+        usleep(CCS811_WAKE_ASSERTED_DELAY);
+    }
+}
+
+static void ccs811_wake_deassert (ccs811_sensor_t* dev)
+{
+    if (dev->wake_gpio != CCS811_GPIO_INVALID) {
+        gpio_set_level(dev->wake_gpio, CCS811_WAKE_DEASSERTED);
+        usleep(CCS811_WAKE_DEASSERTED_DELAY);
+    }
+}
 
 static bool ccs811_enable_threshold (ccs811_sensor_t* dev, bool enabled)
 {
@@ -483,7 +521,11 @@ static bool ccs811_reg_read(ccs811_sensor_t* dev, uint8_t reg, uint8_t *data, ui
 
     debug_dev ("Read %d byte from i2c slave starting at reg addr %02x.", __FUNCTION__, dev, len, reg);
 
+    ccs811_wake_assert(dev);
+
     int result = i2c_slave_read(dev->bus, dev->addr, &reg, data, len);
+
+    ccs811_wake_deassert(dev);
 
     if (result)
     {
@@ -523,8 +565,11 @@ static bool ccs811_reg_write(ccs811_sensor_t* dev, uint8_t reg, uint8_t *data, u
     }
 #   endif
 
+    ccs811_wake_assert(dev);
 
     int result = i2c_slave_write(dev->bus, dev->addr, &reg, data, len);
+
+    ccs811_wake_deassert(dev);
 
     if (result)
     {

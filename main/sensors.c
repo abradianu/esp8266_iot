@@ -138,7 +138,9 @@ esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
     i2c_set_clock_stretch (i2c_bus, CCS811_I2C_CLOCK_STRETCH);
 
     /* Init CCS811, for monitoring Indoor Air Quality */
-    ccs811_sensor = ccs811_init_sensor(i2c_bus, CCS811_I2C_ADDRESS_1);
+    ccs811_sensor = ccs811_init_sensor(i2c_bus,
+                                       CCS811_I2C_ADDRESS_1,
+                                       wake_gpio);
     if (ccs811_sensor) {
         uint16_t baseline;
 

@@ -44,7 +44,7 @@
 #define CCS811_DRV_H_
 
 // Uncomment one of the following defines to enable debug output
-// #define CCS811_DEBUG_LEVEL_1             // only error messages
+ #define CCS811_DEBUG_LEVEL_1             // only error messages
 // #define CCS811_DEBUG_LEVEL_2             // debug and error messages
 
 #include "stdint.h"
@@ -96,6 +96,8 @@
 #define CCS_TVOC_RANGE_MIN 0
 #define CCS_TVOC_RANGE_MAX 1187
 
+#define CCS811_GPIO_INVALID       (0xff)
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -124,6 +126,8 @@ typedef struct {
     uint8_t       bus;         // I2C bus
     uint8_t       addr;        // I2C slave address
 
+    uint8_t       wake_gpio;   // Wake GPIO pin
+
     ccs811_mode_t mode;        // operation mode
 
 } ccs811_sensor_t;
@@ -136,10 +140,11 @@ typedef struct {
  *
  * @param  bus       I2C bus at which CCS811 sensor is connected
  * @param  addr      I2C slave address of the CCS811 sensor
+ * @param  wake_gpio CCS811 WAKE GPIO pin
  *
  * @return           pointer to sensor data structure, or NULL on error
  */
-ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr);
+ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr, uint8_t wake_gpio);
 
 
 /**
