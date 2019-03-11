@@ -305,15 +305,19 @@ static display_mode_t display_buttons_check()
     
     /*
      * Check if both OTA and brightness buttons are pressed and restart 
-     * in AP mode if so.
+     * in AP or Station mode if so.
      */
     if (gpio_get_level(GPIO_DISPLAY_BRIGHTNESS_BUTTON) == 0 &&
         gpio_get_level(GPIO_OTA_BUTTON) == 0) {
-        /* Restart in AP mode */
-        if (nvs_set_u8(nvs_get_handle(), NVS_WIFI_AP_MODE, 1) == ESP_OK) {
-            ESP_LOGI(TAG, "Rebooting in AP mode...");
-            vTaskDelay(500 / portTICK_RATE_MS);
-            esp_restart();
+
+        /* Restart in AP or Station mode depending on the current mode */
+        if (nvs_set_u8(nvs_get_handle(),
+                       NVS_WIFI_AP_MODE,
+                       wifi_state == WIFI_AP_MODE ? 0 : 1) == ESP_OK) {
+                ESP_LOGI(TAG, "Rebooting in %s mode...",
+                              wifi_state == WIFI_AP_MODE ? "Station" : "AP");
+                vTaskDelay(500 / portTICK_RATE_MS);
+                esp_restart();
         }
     }
     return display_mode;
@@ -325,6 +329,9 @@ static void display_task(void *arg)
     char disp_buf[6];
     display_mode_t display_mode;
     uint32_t next_clock_run_time = 0;
+    int delay = BLINK_RATE_WIFI_NOT_CONNECTED;
+    struct tm timeinfo;
+    time_t now;
     
     while (1) {
         display_mode = display_buttons_check();
@@ -332,10 +339,6 @@ static void display_task(void *arg)
         if (display_mode == DISPLAY_MODE_CLOCK) {
             if (xTaskGetTickCount() * portTICK_RATE_MS < next_clock_run_time)
                 continue;
-
-            int delay = BLINK_RATE_WIFI_NOT_CONNECTED;
-            struct tm timeinfo;
-            time_t now;
 
             time(&now);
             localtime_r(&now, &timeinfo);
