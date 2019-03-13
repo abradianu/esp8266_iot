@@ -125,6 +125,13 @@
  */
 #define TIMEZONE                       "EET-2EEST-3,M3.5.0,M10.5.0"
 
+#define FATAL_ERROR(fmt, args...)                     \
+do {                                                  \
+    ESP_LOGE(TAG, fmt,## args);                       \
+    ESP_LOGE(TAG, "Rebooting in 5 seconds");          \
+    vTaskDelay(5000 / portTICK_RATE_MS);              \
+    esp_restart();                                    \
+} while (0)
 
 typedef enum {
     WIFI_AP_MODE,
@@ -150,10 +157,17 @@ static wifi_state_t wifi_state;
 /* 4-Digits 7 segments display */
 static tm1637_display_t *tm1637_display;
 
-static void display_init(void)
+static esp_err_t display_init(void)
 {
+    ESP_LOGI(TAG, "Display init");
+
     /* Init TM1637, 4 digit 7 Segments display */
     tm1637_display = tm1637_init(GPIO_TM1637_CLK, GPIO_TM1637_DATA, TM1637_CLOCK_FREQ);
+    if (!tm1637_display) {
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 static void display_write(char *str)
@@ -166,9 +180,7 @@ static esp_err_t display_set_brightness(uint8_t brightness_level)
     if (brightness_level > TM1637_MAX_BRIGHTNESS)
         return ESP_FAIL;
 
-    tm1637_set_brightness(tm1637_display, brightness_level);
-    
-    return ESP_OK;
+    return tm1637_set_brightness(tm1637_display, brightness_level);
 }
 
 static void sntp_start(void)
@@ -291,7 +303,7 @@ static display_mode_t display_buttons_check()
             if (ota_start(OTA_SERVER_IP, OTA_SERVER_PORT, OTA_FILENAME,
                 display_ota_progress_cb) == ESP_OK) {
                 send_ota_result(1);
-                ESP_LOGI(TAG, "Reboot...!");
+                ESP_LOGI(TAG, "Rebooting...!");
                 vTaskDelay(100 / portTICK_RATE_MS);
                 esp_restart();
             }
@@ -314,10 +326,10 @@ static display_mode_t display_buttons_check()
         if (nvs_set_u8(nvs_get_handle(),
                        NVS_WIFI_AP_MODE,
                        wifi_state == WIFI_AP_MODE ? 0 : 1) == ESP_OK) {
-                ESP_LOGI(TAG, "Rebooting in %s mode...",
-                              wifi_state == WIFI_AP_MODE ? "Station" : "AP");
-                vTaskDelay(500 / portTICK_RATE_MS);
-                esp_restart();
+            ESP_LOGI(TAG, "Rebooting in %s mode...",
+                          wifi_state == WIFI_AP_MODE ? "Station" : "AP");
+            vTaskDelay(500 / portTICK_RATE_MS);
+            esp_restart();
         }
     }
     return display_mode;
@@ -385,16 +397,21 @@ static void display_task(void *arg)
         } else {
             sensors_data_t sensors_data;
 
-            sensors_get_data(&sensors_data);
-
-            if (display_mode == DISPLAY_MODE_TEMPERATURE)
-                sprintf(disp_buf, "%02d:%1d ", (int)sensors_data.temp, (int)(sensors_data.temp * 10) % 10);
-            else if (display_mode == DISPLAY_MODE_HUMIDITY)
-                sprintf(disp_buf, "  %02d", (int)sensors_data.humidity);
-            else
-                sprintf(disp_buf, "%04d", sensors_data.eco2);
+            if (sensors_get_data(&sensors_data) == ESP_OK) {
+                if (display_mode == DISPLAY_MODE_TEMPERATURE)
+                    sprintf(disp_buf, "%02d:%1d ", (int)sensors_data.temp, (int)(sensors_data.temp * 10) % 10);
+                else if (display_mode == DISPLAY_MODE_HUMIDITY)
+                    sprintf(disp_buf, "  %02d", (int)sensors_data.humidity);
+                else
+                    sprintf(disp_buf, "%04d", sensors_data.eco2);
+            } else {
+                sprintf(disp_buf, "8888");
+            }
 
             display_write(disp_buf);
+
+            /* Display the sensors info for at least 500ms */
+            vTaskDelay(500 / portTICK_RATE_MS);
         }
         
         vTaskDelay(DISPLAY_TASK_LOOP_DELAY / portTICK_RATE_MS);
@@ -408,9 +425,7 @@ static void main_task(void *arg)
 
     if (xTaskCreate(display_task, "display_task", DISPLAY_TASK_STACK_SIZE,
         NULL, DISPLAY_TASK_PRIORITY, NULL) != pdPASS) {
-        ESP_LOGE(TAG, "Display task not started! Rebooting...");
-        vTaskDelay(1000 / portTICK_RATE_MS);
-        esp_restart();
+        FATAL_ERROR("Display task could not be created!");
     }
 
     while (1) {
@@ -423,7 +438,7 @@ static void main_task(void *arg)
 
             /* Init the MQTT command receiving logic */
             if (cmd_recv_init() != ESP_OK) {
-                ESP_LOGE(TAG, "CMD parse not started");
+                FATAL_ERROR("CMD not started!");
             }
             
             init_done = true;
@@ -455,12 +470,7 @@ static void main_task(void *arg)
 static void wifi_init_softap(void)
 {
     char* base_mac = nvs_get_base_mac();
-
-    tcpip_adapter_init();
-    ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
     wifi_config_t wifi_config = {
         .ap = {
             .max_connection = 4,
@@ -468,14 +478,22 @@ static void wifi_init_softap(void)
         },
     };
 
+    tcpip_adapter_init();
+    if (esp_event_loop_init(event_handler, NULL) != ESP_OK ||
+        esp_wifi_init(&cfg) != ESP_OK) {
+        FATAL_ERROR("Could not init WiFi!");
+    }
+
     /* Base mac is both the SSID and password */
     strcpy((char *)wifi_config.ap.ssid, base_mac);
     strcpy((char *)wifi_config.ap.password, base_mac);
     wifi_config.ap.ssid_len = strlen(base_mac);
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    if (esp_wifi_set_mode(WIFI_MODE_AP) != ESP_OK                   ||
+        esp_wifi_set_config(ESP_IF_WIFI_AP, &wifi_config) != ESP_OK ||
+        esp_wifi_start() != ESP_OK) {
+        FATAL_ERROR("Could not start AP mode!");
+    }
 
     ESP_LOGI(TAG, "Init softap with SSID %s pass %s",
              wifi_config.ap.ssid, wifi_config.ap.password);
@@ -483,27 +501,33 @@ static void wifi_init_softap(void)
 
 static void wifi_init_sta(char* ssid, char* pass)
 {
-    tcpip_adapter_init();
-    ESP_ERROR_CHECK(esp_event_loop_init(event_handler, NULL));
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-
     wifi_config_t wifi_config;
+
+    tcpip_adapter_init();
+    if (esp_event_loop_init(event_handler, NULL) != ESP_OK ||
+        esp_wifi_init(&cfg) != ESP_OK                      ||
+        esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) {
+        FATAL_ERROR("Could not init WiFi!");
+    }
+
     memset(&wifi_config, 0, sizeof(wifi_config));
     strcpy((char *)wifi_config.sta.ssid, ssid);
     strcpy((char *)wifi_config.sta.password, pass);
     ESP_LOGI(TAG, "Setting WiFi configuration SSID %s...", wifi_config.sta.ssid);
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    if (esp_wifi_set_mode(WIFI_MODE_STA) != ESP_OK                   ||
+        esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config) != ESP_OK ||
+        esp_wifi_start() != ESP_OK) {
+        FATAL_ERROR("Could not stat station mode!");
+    }
 }
 
-static void uart_init(void)
+static esp_err_t uart_init(void)
 {
-   /* Configure UART to 115200, 8N1*/
-   
+    ESP_LOGI(TAG, "UART init");
+
+    /* Configure UART to 115200, 8N1*/   
     uart_config_t uart_config = {
         .baud_rate = 115200,
         .data_bits = UART_DATA_8_BITS,
@@ -511,22 +535,23 @@ static void uart_init(void)
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
     };
-    ESP_ERROR_CHECK(uart_param_config(0, &uart_config));
+    return (uart_param_config(0, &uart_config));
 }
 
-static void gpio_init(void)
+static esp_err_t gpio_init(void)
 {
     gpio_config_t io_conf;
 
     /* Config LED GPIO */
-    ESP_LOGI(TAG, "GPIO config");
+    ESP_LOGI(TAG, "GPIO init");
 
     io_conf.intr_type = GPIO_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = (1 << GPIO_BLUE_LED);
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    if (gpio_config(&io_conf) != ESP_OK)
+        return ESP_FAIL;
         
     /* Config buttons */
     io_conf.intr_type = GPIO_INTR_DISABLE;
@@ -536,45 +561,45 @@ static void gpio_init(void)
                            (1 << GPIO_DISPLAY_TEMP_BUTTON)       |
                            (1 << GPIO_DISPLAY_HUMIDITY_BUTTON);
     io_conf.pull_up_en = 1;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
+    return gpio_config(&io_conf);
 }
 
 void app_main()
 {
-    esp_err_t ret;
     uint8_t ap_mode = 0;
     uint8_t brightness_level = 0;
     nvs_handle nvs;
     char wifi_ssid[24];
     char wifi_pass[24];
 
-    uart_init();
-    gpio_init();
-    i2c_init(I2C_SENSORS_BUS, GPIO_I2C_MASTER_SCL, GPIO_I2C_MASTER_SDA, I2C_CLOCK_FREQ);
-
-    if ((ret = nvs_init()) != ESP_OK ||
-        !(nvs = nvs_get_handle())) {
-        ESP_LOGE(TAG, "Could not init NVS, ret 0x%x", ret);
-        vTaskDelay(1000 / portTICK_RATE_MS);
-        esp_restart();
+    /* Init drivers */
+    if (uart_init() != ESP_OK    ||
+        gpio_init() != ESP_OK    ||
+        display_init() != ESP_OK ||
+        nvs_init() != ESP_OK     ||
+        i2c_init(I2C_SENSORS_BUS,
+                 GPIO_I2C_MASTER_SCL,
+                 GPIO_I2C_MASTER_SDA,
+                 I2C_CLOCK_FREQ) != 0) {
+        FATAL_ERROR("Could not init drivers!");
     }
 
     ESP_LOGI(TAG, "FW VERSION: %s", FW_VERSION);
     ESP_LOGI(TAG, "BASE MAC  : %s", nvs_get_base_mac());
-    
+
+    /* Turn off blue LED */
+    gpio_set_level(GPIO_BLUE_LED, 1);
+
+    nvs = nvs_get_handle();
+
     /* Read display brightness_level from flash */
     nvs_get_u8(nvs, NVS_DISPLAY_BRIGHTNESS, &brightness_level);
 
-    display_init();
-    
     /* Blank the display and set brightness */
     display_write("    ");
     display_set_brightness(brightness_level);
 
     sensors_init(I2C_SENSORS_BUS, GPIO_SENSORS_WAKE_GPIO);
-
-    /* Turn off blue LED */
-    gpio_set_level(GPIO_BLUE_LED, 1);
 
     /* Read WiFi mode from flash*/
     nvs_get_u8(nvs, NVS_WIFI_AP_MODE, &ap_mode);
@@ -607,5 +632,8 @@ void app_main()
     setenv("TZ", TIMEZONE, 1);
     tzset();
 
-    xTaskCreate(main_task, "main_task", MAIN_TASK_STACK_SIZE, NULL, MAIN_TASK_PRIORITY, NULL);
+    if (xTaskCreate(main_task, "main_task", MAIN_TASK_STACK_SIZE, NULL,
+        MAIN_TASK_PRIORITY, NULL) != pdPASS) {
+        FATAL_ERROR("Main task could not be created!");
+    }
 }

@@ -65,19 +65,19 @@ void http_server_task(void *pvParameters)
     /* Create a new connection */
     conn = netconn_new(NETCONN_TCP);
     if (conn == NULL) {
-        ESP_LOGE(TAG, "Failed to create new TCP connection");
+        ESP_LOGE(TAG, "Failed to create new TCP connection!");
         return;
     }
 
     send_buf = malloc(HTTP_SEND_BUF_SIZE);
     if (send_buf == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate send buffer");
+        ESP_LOGE(TAG, "Failed to allocate send buffer!");
         return;
     }
 
     if (netconn_bind(conn, IP_ADDR_ANY, HTTP_PORT) != ERR_OK ||
         netconn_listen(conn) != ERR_OK) {
-        ESP_LOGE(TAG, "Failed to bind/listen on the TCP socket");
+        ESP_LOGE(TAG, "Failed to bind/listen on the TCP socket!");
         free(send_buf);
         return;
     }
@@ -183,7 +183,7 @@ void http_server_task(void *pvParameters)
                 if (nvs_set_str(nvs, NVS_WIFI_SSID, ssid) != ESP_OK ||
                     nvs_set_str(nvs, NVS_WIFI_PASS, pass) != ESP_OK ||
                     nvs_set_u8(nvs, NVS_WIFI_AP_MODE, 0) != ESP_OK) {
-                    ESP_LOGE(TAG, "Failed to save the new credentials! Rebooting ...");
+                    ESP_LOGE(TAG, "Failed to save the new credentials! Rebooting ...!");
                 } else {
                     ESP_LOGI(TAG, "Rebooting in station mode...");
                 }

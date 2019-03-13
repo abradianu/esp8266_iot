@@ -40,7 +40,7 @@
 
 /* Sensors read intervals in seconds */
 #define SENSORS_CO2_READ_INTERVAL        (2 * 60 * 1000)
-#define SENSORS_TEMP_READ_INTERVAL       (30 * 1000)
+#define SENSORS_TEMP_READ_INTERVAL       (10 * 1000)
 
 /* CCS811 baseline saving interval 24h */
 #define SENSORS_CCS811_BASELINE_INTERVAL (24 * 60 * 60 * 1000)
@@ -73,7 +73,7 @@ void sensors_run()
     static uint32_t last_temp_read = 0;
     static uint32_t last_co2_read = 0;
 #ifdef SENSORS_CCS811
-    static uint32_t last_baseline = 0;
+    static uint32_t last_baseline_read = 0;
 #endif
 
     if (!sensors_initialized)
@@ -85,16 +85,16 @@ void sensors_run()
 #ifdef SENSORS_HDC1080
         /* Read temperature and humidity first */
         if (hdc1080_read(hdc1080_sensor, &sensors_data->temp, &sensors_data->humidity) != ESP_OK) {
-            /* Retry */
+            /* Set retry time */
             last_temp_read += SENSORS_TEMP_READ_INTERVAL / 10;
-        }
-
-        ESP_LOGI(TAG, "Temp %d.%d, Humidity %d.%d",
+        } else {
+            ESP_LOGI(TAG, "Temp %d.%d, Humidity %d",
                 (int)(sensors_data->temp), (int)(sensors_data->temp * 10) % 10,
-                (int)(sensors_data->humidity), (int)(sensors_data->humidity * 10) % 10);
-#endif
+                (int)(sensors_data->humidity));
 
-        last_temp_read = now;
+            last_temp_read = now;
+        }
+#endif
     }
 
     if (now - last_co2_read > SENSORS_CO2_READ_INTERVAL) {
@@ -102,8 +102,9 @@ void sensors_run()
         if (ccs811_get_results (ccs811_sensor, &sensors_data->tvoc, &sensors_data->eco2, NULL, NULL)) {
             ESP_LOGI(TAG, "TVOC %d ppb, eCO2 %d ppm, err 0x%x",
                     sensors_data->tvoc, sensors_data->eco2, ccs811_sensor->error_code);
+            last_co2_read = now;
         } else {
-            /* Retry in 10s */
+            /* Set retry time */
             last_co2_read += SENSORS_CO2_READ_INTERVAL / 10;
         }
 
@@ -111,10 +112,10 @@ void sensors_run()
         ccs811_set_environmental_data(ccs811_sensor, sensors_data->temp, sensors_data->humidity);
 
         /* Save the baseline each 24h */
-        if (now - last_baseline > SENSORS_CCS811_BASELINE_INTERVAL) {
+        if (now - last_baseline_read > SENSORS_CCS811_BASELINE_INTERVAL) {
             uint16_t baseline;
 
-            last_baseline = now;
+            last_baseline_read = now;
 
             baseline = ccs811_get_baseline(ccs811_sensor);
             if (baseline) {
@@ -123,16 +124,11 @@ void sensors_run()
             }
         }
 #endif
-        last_co2_read = now;
     }
 }
 
 esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
 {
-    sensors_data = calloc(1, sizeof(sensors_data_t));
-    if (!sensors_data)
-        return ESP_FAIL;
-
 #ifdef SENSORS_CCS811
     /* longer clock stretching is required for CCS811 */
     i2c_set_clock_stretch (i2c_bus, CCS811_I2C_CLOCK_STRETCH);
@@ -152,7 +148,7 @@ esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
 
         ccs811_set_mode(ccs811_sensor, ccs811_mode_60s);
     } else {
-        ESP_LOGE(TAG, "Failed to init CCS811 sensor");
+        ESP_LOGE(TAG, "Failed to init CCS811 sensor!");
         return ESP_FAIL;
     }
 #endif
@@ -161,10 +157,14 @@ esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
     /* Init temperature and humidity sensor */
     hdc1080_sensor = hdc1080_init(i2c_bus);
     if (!hdc1080_sensor) {
-        ESP_LOGE(TAG, "Failed to init HDC1080 sensor");
+        ESP_LOGE(TAG, "Failed to init HDC1080 sensor!");
         return ESP_FAIL;
     }
 #endif
+
+    sensors_data = calloc(1, sizeof(sensors_data_t));
+    if (!sensors_data)
+        return ESP_FAIL;
 
     ESP_LOGI(TAG, "Sensors init done");
     sensors_initialized = true;

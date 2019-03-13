@@ -91,23 +91,23 @@ esp_err_t mqtt_client_publish(void * ctrl_handle, const char *topic,
     
     if (mqtt_client_ctrl == NULL ||
         (mqtt_client = mqtt_client_ctrl->mqtt_client) == NULL) {
-        ESP_LOGE(TAG, "NULL ctrl_handle or mqtt_client");
+        ESP_LOGE(TAG, "NULL ctrl_handle or mqtt_client!");
         return ESP_FAIL;
     }
 
     if (data == NULL || !len) {
-        ESP_LOGE(TAG, "Invalid data");
+        ESP_LOGE(TAG, "Invalid data!");
         return ESP_FAIL;
     }
 
     if (!mqtt_client_is_connected(mqtt_client)) {
-        ESP_LOGI(TAG, "Publish failed, mqtt not connected");
+        ESP_LOGI(TAG, "Publish failed, mqtt not connected!");
         return ESP_FAIL;
     }
 
     err = mqtt_publish(mqtt_client, topic, data, len, qos, retain, mqtt_pub_request_cb, mqtt_client_ctrl);
     if (err != ERR_OK) {
-        ESP_LOGI(TAG, "Publish err: %d", err);
+        ESP_LOGI(TAG, "Publish failed, err %d!", err);
         return ESP_FAIL;
     }
 
@@ -135,12 +135,12 @@ static void mqtt_sub_request_cb(void *arg, err_t result)
     mqtt_client_ctrl_t * mqtt_client_ctrl = arg;
 
     if (mqtt_client_ctrl == NULL) {
-        ESP_LOGE(TAG, "%s: NULL arg", __FUNCTION__);
+        ESP_LOGE(TAG, "%s: NULL arg!", __FUNCTION__);
         return;
     }
 
     if (result != ERR_OK) {
-        ESP_LOGI(TAG,"Subscribe failed, ret %d\n", result);
+        ESP_LOGI(TAG,"Subscribe failed, ret %d!\n", result);
 
         mqtt_client_ctrl->error = MQTT_ERROR_SUBSCRIBE;
     }
@@ -244,7 +244,7 @@ static void mqtt_client_task(void *arg)
             err = mqtt_subscribe(mqtt_client, client_info->sub_topic, client_info->sub_qos,
                                 mqtt_sub_request_cb, mqtt_client_ctrl);
             if (err != ERR_OK) {
-                ESP_LOGI(TAG, "Subscribe error, ret: %d", err);
+                ESP_LOGI(TAG, "Subscribe error, ret: %d!", err);
                 continue;
             }
 

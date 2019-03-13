@@ -145,11 +145,17 @@ esp_err_t tm1637_write(tm1637_display_t *dev, char *str)
 {
     uint8_t cmd_len = 0, cmd[6];
     uint8_t i, str_len;
-    
+
     str_len = strlen (str);
-    if (str_len > 5)
+
+    if (!dev || !str_len)
         return ESP_FAIL;
-       
+
+    if (str_len > 5) {
+        ESP_LOGE(TAG, "String too long!");
+        return ESP_FAIL;
+    }
+
     /* Data command: Normal mode, automatic address adding, write data */
     cmd[0] = TM1637_DATA_CMD_WRITE;
     if (tm1637_write_data(dev, cmd, 1) != ESP_OK)
@@ -157,7 +163,7 @@ esp_err_t tm1637_write(tm1637_display_t *dev, char *str)
 
     /* Address command setting: Display address 0 */
     cmd[cmd_len++] = TM1637_ADDRESS_CMD;
-    
+
     for (i = 0; i < str_len; i++) {
         if (str[i] >= '0' && str[i] <= '9') {
             cmd[cmd_len++] = bcd_2_segments[str[i] - '0'];
@@ -178,6 +184,9 @@ esp_err_t tm1637_set_brightness(tm1637_display_t *dev, uint8_t val)
     if (val > TM1637_MAX_BRIGHTNESS)
         val = TM1637_MAX_BRIGHTNESS;
 
+    if (!dev)
+        return ESP_FAIL;
+
     cmd = TM1637_DISPLAY_CTRL_ON | val;
     return tm1637_write_data(dev, &cmd, 1);
 }
@@ -189,17 +198,18 @@ tm1637_display_t * tm1637_init(gpio_num_t clk_pin, gpio_num_t data_pin, uint32_t
 
     if ((dev = malloc (sizeof(tm1637_display_t))) == NULL)
         return NULL;
-    
+
     dev->clk_pin = clk_pin;
     dev->data_pin = data_pin;
-    
+
     /* Compute clock period/2 in us */
     dev->clk_delay = (1000000 / clk_freq) / 2;
     if (!dev->clk_delay) {
+        ESP_LOGE(TAG, "Wrong clock frequency!");
         free (dev);
         return NULL;
     }
-    
+
     ESP_LOGI(TAG, "Init: clk_pin %d, data_pin %d, clk_delay %d",
              dev->clk_pin, dev->data_pin, dev->clk_delay);
 
@@ -209,12 +219,13 @@ tm1637_display_t * tm1637_init(gpio_num_t clk_pin, gpio_num_t data_pin, uint32_t
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 0;
     if (gpio_config(&io_conf) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to config GPIO!");
         free (dev);
         return NULL;
     }
-   
+
     gpio_set_level(dev->clk_pin, 1);
     gpio_set_level(dev->data_pin, 1);
-    
+
     return dev;
 }

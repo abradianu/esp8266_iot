@@ -76,14 +76,18 @@ esp_err_t nvs_init()
     }
 
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Could not init NVS, ret 0x%x!", ret);
         return ret;
     }
 
     /* Open NVS flash */
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_flash_handle) != ESP_OK) {        
-        ESP_LOGI(TAG, "Could not open NVS %s, ret 0x%x", NVS_NAMESPACE, ret);
+        ESP_LOGE(TAG, "Could not open NVS %s, ret 0x%x!", NVS_NAMESPACE, ret);
         return ESP_FAIL;
     }
+
+    if (!nvs_flash_handle)
+        return ESP_FAIL;
 
     return ESP_OK;
 }

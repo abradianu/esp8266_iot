@@ -68,12 +68,23 @@ hdc1080_sensor_t* hdc1080_init(uint8_t bus)
     reg = HDC1080_REG_MANUF_ID;
     if (i2c_slave_read(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0 ||
         ((data[0] << 8) | data[1]) != HDC1080_MANUF_ID) {
+        ESP_LOGE(TAG, "Wrong manufacturer ID 0x%x!", (data[0] << 8) | data[1]);
         return NULL;
     }
 
     reg = HDC1080_REG_DEVICE_ID;
     if (i2c_slave_read(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0 ||
         ((data[0] << 8) | data[1]) != HDC1080_DEVICE_ID) {
+        ESP_LOGE(TAG, "Wrong device ID 0x%x!", (data[0] << 8) | data[1]);
+        return NULL;
+    }
+
+    reg = HDC1080_REG_CONFIG;
+    data[0] =   HDC1080_REG_CONFIG_TRES_14BIT |
+                HDC1080_REG_CONFIG_HRES_11BIT |
+                HDC1080_REG_CONFIG_MODE_BOTH;
+    data[1] = 0;
+    if (i2c_slave_write(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0) {
         return NULL;
     }
 
@@ -82,16 +93,6 @@ hdc1080_sensor_t* hdc1080_init(uint8_t bus)
 
     /* init sensor data structure */
     dev->bus  = bus;
-
-    reg = HDC1080_REG_CONFIG;
-    data[0] =   HDC1080_REG_CONFIG_TRES_14BIT |
-                HDC1080_REG_CONFIG_HRES_11BIT |
-                HDC1080_REG_CONFIG_MODE_BOTH;
-    data[1] = 0;
-    if (i2c_slave_write(bus, HDC1080_I2C_ADDRESS, &reg, data, 2) != 0) {
-        free(dev);
-        return NULL;
-    }
 
     ESP_LOGI(TAG, "HDC1080 init done, I2C bus %d, addr 0x%x", bus, HDC1080_I2C_ADDRESS);
     
@@ -104,7 +105,8 @@ esp_err_t hdc1080_read(hdc1080_sensor_t* sensor, float * temp, float * humidity)
     uint8_t reg;
     uint8_t data[4];
 
-    if (!temp || !humidity)
+    /* At least one is not NULL */
+    if (!temp && !humidity)
         return ESP_FAIL;
 
     /* 
@@ -113,6 +115,7 @@ esp_err_t hdc1080_read(hdc1080_sensor_t* sensor, float * temp, float * humidity)
      */
     reg = HDC1080_REG_TEMPERATURE;
     if (i2c_slave_write(sensor->bus, HDC1080_I2C_ADDRESS, &reg, NULL, 0) != 0) {
+        ESP_LOGE(TAG, "Failed to trigger the measurements!");
         return ESP_FAIL;
     }
 
@@ -124,12 +127,15 @@ esp_err_t hdc1080_read(hdc1080_sensor_t* sensor, float * temp, float * humidity)
 
     /* Read both temperature and humidity in a single read transaction */
     if (i2c_slave_read(sensor->bus, HDC1080_I2C_ADDRESS, NULL, data, 4) != 0) {
+        ESP_LOGE(TAG, "Failed to read the measurements!");
         return ESP_FAIL;
     }
 
     /* Chapters 8.6.1 & 8.6.2 from HDC1080 datasheet */
-    *temp = ((float)(165 * ((data[0] << 8) | data[1]))) / (1 << 16) - 40;
-    *humidity = (100 * ((data[2] << 8) | data[3])) / (1 << 16);
+    if (temp)
+        *temp = ((float)(165 * ((data[0] << 8) | data[1]))) / (1 << 16) - 40;
+    if (humidity)
+        *humidity = (100 * ((data[2] << 8) | data[3])) / (1 << 16);
 
     return ESP_OK;
 }

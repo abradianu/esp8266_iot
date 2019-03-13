@@ -93,8 +93,8 @@ static char * mqtt_client_id;
 
 static void do_reboot()
 {
-    ESP_LOGI(TAG, "Reboot requested by command...");
-    vTaskDelay(200 / portTICK_RATE_MS);
+    ESP_LOGI(TAG, "Reboot requested by command...!");
+    vTaskDelay(500 / portTICK_RATE_MS);
     esp_restart();
 }
 
@@ -103,18 +103,19 @@ static void cmd_recv_cb(const uint8_t * data, uint16_t len, bool last)
 {
     uint8_t * data_buf;
     cmd_data_t * cmd;
-    
-    /* Allocate data buffer */
+
+    /* Allocate the data buffer */
     data_buf = malloc(len + 1);
     if (!data_buf) {
-        ESP_LOGI(TAG, "Not enough memory for the data");
+        ESP_LOGE(TAG, "Could not allocate data buffer!");
         return;
     }
 
     /* Allocate the cmd */
     cmd = malloc(sizeof(cmd_data_t));
     if (!cmd) {
-        ESP_LOGI(TAG, "Not enough memory for the command");
+        ESP_LOGE(TAG, "Could not allocate command buffer!");
+        free(data_buf);
         return;
     }
 
@@ -128,7 +129,10 @@ static void cmd_recv_cb(const uint8_t * data, uint16_t len, bool last)
 
     ESP_LOGI(TAG, "Cmd received, len %d, last %d", len, last);
     if (xQueueSend(cmd_recv_queue, (void *)&cmd, 0) != pdPASS) {
-        ESP_LOGI(TAG, "Command discarded, queue is full");
+        ESP_LOGE(TAG, "Command discarded, queue is full!");
+
+        free(cmd->data);
+        free(cmd);
     }
 }
 
@@ -141,7 +145,7 @@ static esp_err_t mqtt_start()
 
     if (nvs) {
         size_t len;
-        
+
         /* Read MQTT client name from flash */        
         if (nvs_get_str(nvs, NVS_MQTT_CLIENT_ID, NULL, &len) == ESP_OK) {
             mqtt_client_id = calloc(1, len + 1);
@@ -183,7 +187,7 @@ static esp_err_t mqtt_start()
 
     return ESP_OK;
 error:
-    ESP_LOGI(TAG, "MQTT client start failed");
+    ESP_LOGI(TAG, "MQTT client start failed!");
 
     if (mqtt_client_id != nvs_get_base_mac())
         free(mqtt_client_id);
@@ -200,14 +204,14 @@ static esp_err_t cmd_do_reboot(cJSON *root)
     ap_mode = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_AP_MODE);
     if (ap_mode != NULL) {
         if (!cJSON_IsNumber(ap_mode)) {
-            ESP_LOGE(TAG, "Wrong DO_REBOOT format");
+            ESP_LOGE(TAG, "Wrong DO_REBOOT format!");
             return ESP_FAIL;
         }
 
         /* Save the AP mod in flash*/
         if (nvs_get_handle()) {        
             if (nvs_set_u8(nvs_get_handle(), NVS_WIFI_AP_MODE, ap_mode->valueint) != ESP_OK) {
-                ESP_LOGI(TAG, "Failed to write the AP mode");
+                ESP_LOGI(TAG, "Failed to write the AP mode!");
                 return ESP_FAIL;
             }
         }
@@ -226,19 +230,19 @@ static esp_err_t cmd_do_ota(cJSON *root)
 
     server = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_SERVER);
     if (server == NULL || !cJSON_IsString(server)) {
-        ESP_LOGE(TAG, "Wrong OTA server format");
+        ESP_LOGE(TAG, "Wrong OTA server format!");
         return ESP_FAIL;
     }
 
     port = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_PORT);
     if (port == NULL || !cJSON_IsNumber(port)) {
-        ESP_LOGE(TAG, "Wrong OTA port format");
+        ESP_LOGE(TAG, "Wrong OTA port format!");
         return ESP_FAIL;
     }
 
     file = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_FILENAME);
     if (file == NULL || !cJSON_IsString(file)) {
-        ESP_LOGE(TAG, "Wrong OTA file format");
+        ESP_LOGE(TAG, "Wrong OTA file format!");
         return ESP_FAIL;
     }
 
@@ -248,7 +252,6 @@ static esp_err_t cmd_do_ota(cJSON *root)
     if (ota_start(server->valuestring, port->valueint, file->valuestring, NULL) == ESP_OK) {
         send_ota_result(1);
 
-        vTaskDelay(500 / portTICK_RATE_MS);
         do_reboot();
     }
 
@@ -265,7 +268,7 @@ static esp_err_t cmd_set_mqtt_client_name(cJSON *root)
 
     client_name = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_CLIENT_NAME);
     if (client_name == NULL || !cJSON_IsString(client_name)) {
-        ESP_LOGE(TAG, "Wrong MQTT client name");
+        ESP_LOGE(TAG, "Wrong MQTT client name!");
         return ESP_FAIL;
     }
 
@@ -274,7 +277,7 @@ static esp_err_t cmd_set_mqtt_client_name(cJSON *root)
     /* Save in flash, will be taken into consideration at the next reboot */
     if (nvs_get_handle()) {        
         if (nvs_set_str(nvs_get_handle(), NVS_MQTT_CLIENT_ID, client_name->valuestring) != ESP_OK) {
-            ESP_LOGI(TAG, "Failed to write the MQTT client name");
+            ESP_LOGI(TAG, "Failed to write the MQTT client name!");
             return ESP_FAIL;
         }
 
@@ -292,26 +295,23 @@ static void cmd_recv(cmd_data_t * cmd)
 
     root = cJSON_Parse((char *)cmd->data);
     if (root == NULL) {
-        ESP_LOGE(TAG, "Could not create JSON object");
+        ESP_LOGE(TAG, "Could not create JSON object!");
         return;
     }
 
     cmd_nr = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_CMD);
-    if (cmd_nr == NULL) {
-        ESP_LOGE(TAG, "Wrong command format");
+    if (cmd_nr == NULL ||
+        !cJSON_IsNumber(cmd_nr)) {
+        ESP_LOGE(TAG, "Wrong command format!");
+        cJSON_Delete(root);
         return;
     }
 
-    if (cJSON_IsNumber(cmd_nr)) {
-        ESP_LOGE(TAG, "Command number: %d", cmd_nr->valueint);
-    } else {
-        ESP_LOGE(TAG, "Wrong command format");
-        return;
-    }
+    ESP_LOGI(TAG, "Command number: %d", cmd_nr->valueint);
 
     switch(cmd_nr->valueint) {
         case CMD_DO_REBOOT:
-            cmd_do_reboot(root);
+            ret = cmd_do_reboot(root);
             break;
 
         case CMD_DO_OTA:
@@ -326,8 +326,9 @@ static void cmd_recv(cmd_data_t * cmd)
         {
             sensors_data_t sensors_data;
 
-            sensors_get_data(&sensors_data);
-            ret = send_sensors_info(&sensors_data);
+            ret = ESP_FAIL;
+            if (sensors_get_data(&sensors_data) == ESP_OK)
+                ret = send_sensors_info(&sensors_data);
             break;
         }
         case CMD_SET_MQTT_CLIENT_NAME:
@@ -335,12 +336,12 @@ static void cmd_recv(cmd_data_t * cmd)
             break;
 
         default:
-            ESP_LOGE(TAG, "Command %d not implemented", cmd_nr->valueint);
+            ESP_LOGE(TAG, "Command %d not implemented!", cmd_nr->valueint);
             break;
     }
     
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Command %d failed", cmd_nr->valueint);
+        ESP_LOGE(TAG, "Command %d failed!", cmd_nr->valueint);
     }
 
     cJSON_Delete(root);
@@ -367,14 +368,11 @@ static void cmd_recv_task(void *arg)
         if (xQueueReceive(cmd_recv_queue, &cmd, portMAX_DELAY)) {
             ESP_LOGI(TAG, "Cmd received: \"%s\"", cmd->data);
             
-            if (!cmd->last) {
-                ESP_LOGI(TAG, "Fragmented command. Not supported yet");
-                free(cmd->data);
-                free(cmd);
-                continue;
+            if (cmd->last) {
+                cmd_recv(cmd);
+            } else {
+                ESP_LOGE(TAG, "Fragmented command. Not supported yet!");
             }
-
-            cmd_recv(cmd);
 
             free(cmd->data);
             free(cmd);
@@ -400,7 +398,7 @@ esp_err_t send_ota_result(esp_err_t ota_res)
 
     root = cJSON_CreateObject();
     if (root == NULL) {
-        ESP_LOGE(TAG, "Could not create JSON object");
+        ESP_LOGE(TAG, "Could not create JSON object!");
         return ESP_FAIL;
     }
 
@@ -408,7 +406,7 @@ esp_err_t send_ota_result(esp_err_t ota_res)
         !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id) ||
         !cJSON_AddNumberToObject(root, CMD_JSON_TIME, time(NULL))          ||
         !cJSON_AddNumberToObject(root, CMD_JSON_RESULT, ota_res)) {
-        ESP_LOGE(TAG, "Could not add sensors info to JSON");
+        ESP_LOGE(TAG, "Could not add sensors info to JSON!");
 
         cJSON_Delete(root);
         return ESP_FAIL;
@@ -444,15 +442,16 @@ esp_err_t send_sensors_info(sensors_data_t *sensors_data)
     cJSON *root = NULL;
     char * string;
     esp_err_t ret;
-    
-    ESP_LOGI(TAG, "Temp: %f, Humidity %f, co2 %d",
-             sensors_data->temp, sensors_data->humidity, sensors_data->eco2);
 
     root = cJSON_CreateObject();
     if (root == NULL) {
-        ESP_LOGE(TAG, "Could not create JSON object");
+        ESP_LOGE(TAG, "Could not create JSON object!");
         return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "Send sensors info: Temp %d.%d, Humidity %d, co2 %d",
+             (int)(sensors_data->temp), (int)(sensors_data->temp * 10) % 10,
+             (int)(sensors_data->humidity), sensors_data->eco2);
 
     if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, CMD_GET_SENSORS_INFO)  ||
         !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id)  ||
@@ -460,7 +459,7 @@ esp_err_t send_sensors_info(sensors_data_t *sensors_data)
         !cJSON_AddNumberToObject(root, CMD_JSON_CO2, sensors_data->eco2)    ||
         !cJSON_AddNumberToObject(root, CMD_JSON_TEMP, sensors_data->temp)   ||
         !cJSON_AddNumberToObject(root, CMD_JSON_HUMIDITY, sensors_data->humidity)) {
-        ESP_LOGE(TAG, "Could not add sensors info to JSON");
+        ESP_LOGE(TAG, "Could not add sensors info to JSON!");
 
         cJSON_Delete(root);
         return ESP_FAIL;
@@ -504,7 +503,7 @@ esp_err_t send_sys_info()
 
     root = cJSON_CreateObject();
     if (root == NULL) {
-        ESP_LOGE(TAG, "Could not create JSON object");
+        ESP_LOGE(TAG, "Could not create JSON object!");
         return ESP_FAIL;
     }
 
@@ -515,7 +514,7 @@ esp_err_t send_sys_info()
         !cJSON_AddStringToObject(root, CMD_JSON_FW_VER, FW_VERSION)             ||
         !cJSON_AddNumberToObject(root, CMD_JSON_HEAP, esp_get_free_heap_size()) ||
         !cJSON_AddNumberToObject(root, CMD_JSON_UPTIME, uptime)) {
-        ESP_LOGE(TAG, "Could not add sys info to JSON");
+        ESP_LOGE(TAG, "Could not add sys info to JSON!");
     
         cJSON_Delete(root);
         return ESP_FAIL;
@@ -538,12 +537,12 @@ esp_err_t cmd_recv_init(void)
 {
     cmd_recv_queue = xQueueCreate(CMD_PARSE_QUEUE_LEN, sizeof(uint32_t));
     if (cmd_recv_queue == NULL) {
-        ESP_LOGI(TAG, "Failed to create cmd queue");
+        ESP_LOGE(TAG, "Failed to create cmd queue!");
         return ESP_FAIL;
     }
 
     if (mqtt_start() != ESP_OK) {
-        ESP_LOGE(TAG, "MQTT client not started");
+        ESP_LOGE(TAG, "Failed to start MQTT client!");
         return ESP_FAIL;
     }
 
@@ -553,6 +552,7 @@ esp_err_t cmd_recv_init(void)
                     NULL,
                     CMD_RECV_TASK_PRIO,
                     NULL) != pdPASS)  {
+        /* FATAL error, do not care about stopping MQTT client */
         return ESP_FAIL;
     }
 
