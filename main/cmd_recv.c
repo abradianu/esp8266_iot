@@ -499,7 +499,7 @@ esp_err_t send_sys_info()
     esp_err_t ret;
 
     /* uptime in seconds */
-    uptime = (xTaskGetTickCount() * portTICK_RATE_MS) / 1000;
+    uptime = xTaskGetTickCount() / xPortGetTickRateHz();
 
     root = cJSON_CreateObject();
     if (root == NULL) {

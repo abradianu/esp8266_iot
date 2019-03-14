@@ -87,7 +87,7 @@
 /* Display task settings */
 #define DISPLAY_TASK_PRIORITY          10
 #define DISPLAY_TASK_STACK_SIZE        2048
-#define DISPLAY_TASK_LOOP_DELAY        50
+#define DISPLAY_TASK_LOOP_DELAY        50    /* in ms */
 
 /* Display blink rates in ms */
 #define BLINK_RATE_WIFI_AP_MODE_ON     50
@@ -244,14 +244,14 @@ static display_mode_t display_buttons_check()
 {
     static uint32_t ota_btn_press_time = 0;
     static uint32_t brightness_btn_press_time = 0;
-    static uint32_t last_time = 0;
-    uint32_t time_passed, now;
+    static TickType_t prev_tick_count = 0;
+    uint32_t time_passed;
     uint8_t brightness_level;
     display_mode_t display_mode = DISPLAY_MODE_CLOCK;
-    
-    now = xTaskGetTickCount() * portTICK_RATE_MS;
-    time_passed = now - last_time;
-    last_time = now;
+
+    /* Time passed since previous call in ms */
+    time_passed = (xTaskGetTickCount() - prev_tick_count) * portTICK_RATE_MS;
+    prev_tick_count = xTaskGetTickCount();
 
     /* Check if the display temperature button is pressed. */
     if (gpio_get_level(GPIO_DISPLAY_TEMP_BUTTON) == 0) {
@@ -340,60 +340,61 @@ static void display_task(void *arg)
     uint8_t blink_state = 0;
     char disp_buf[6];
     display_mode_t display_mode;
-    uint32_t next_clock_run_time = 0;
+    TickType_t prev_tick_count = 0;
+    uint32_t time_passed;
     int delay = BLINK_RATE_WIFI_NOT_CONNECTED;
     struct tm timeinfo;
     time_t now;
-    
+
     while (1) {
         display_mode = display_buttons_check();
 
         if (display_mode == DISPLAY_MODE_CLOCK) {
-            if (xTaskGetTickCount() * portTICK_RATE_MS < next_clock_run_time)
-                continue;
+            /* Time passed since previous display write */
+            time_passed = (xTaskGetTickCount() - prev_tick_count) * portTICK_RATE_MS;
+            if (time_passed >= delay) {
+                prev_tick_count = xTaskGetTickCount();
 
-            time(&now);
-            localtime_r(&now, &timeinfo);
-        
-            blink_state ^= 1;
-            if (blink_state) {
-                strftime(disp_buf, sizeof(disp_buf), "%H%M", &timeinfo);
-            } else {
-                strftime(disp_buf, sizeof(disp_buf), "%H:%M", &timeinfo);
-            }
+                time(&now);
+                localtime_r(&now, &timeinfo);
+
+                blink_state ^= 1;
+                if (blink_state) {
+                    strftime(disp_buf, sizeof(disp_buf), "%H%M", &timeinfo);
+                } else {
+                    strftime(disp_buf, sizeof(disp_buf), "%H:%M", &timeinfo);
+                }
 
 #ifdef CLOCK_DISPLAY
-            if (wifi_state == WIFI_AP_MODE) {
-                blink_state ? display_write("    ") : display_write("8888");
-            } else {
-                display_write(disp_buf);
-            }
-#else
-            gpio_set_level(GPIO_BLUE_LED, blink_state);
-#endif
-            /* Set blink rate depending on the program state */
-            if (wifi_state == WIFI_AP_MODE) {
-                if (blink_state)
-                    delay = BLINK_RATE_WIFI_AP_MODE_OFF;
-                else
-                    delay = BLINK_RATE_WIFI_AP_MODE_ON;
-            } else if (wifi_state == WIFI_STA_DISCONNECTED) {
-                delay = BLINK_RATE_WIFI_NOT_CONNECTED;
-            } else {
-                if (timeinfo.tm_year < (2019 - 1900)) {
-                    /* Clock is not synced */
-                    delay = BLINK_RATE_TIME_NOT_SYNCED;
+                if (wifi_state == WIFI_AP_MODE) {
+                    blink_state ? display_write("    ") : display_write("8888");
                 } else {
-                    /* Clock is now synced */
+                    display_write(disp_buf);
+                }
+#else
+                gpio_set_level(GPIO_BLUE_LED, blink_state);
+#endif
+                /* Set blink rate depending on the program state */
+                if (wifi_state == WIFI_AP_MODE) {
+                    if (blink_state)
+                        delay = BLINK_RATE_WIFI_AP_MODE_OFF;
+                    else
+                        delay = BLINK_RATE_WIFI_AP_MODE_ON;
+                } else if (wifi_state == WIFI_STA_DISCONNECTED) {
+                    delay = BLINK_RATE_WIFI_NOT_CONNECTED;
+                } else {
+                    if (timeinfo.tm_year < (2019 - 1900)) {
+                        /* Clock is not synced */
+                        delay = BLINK_RATE_TIME_NOT_SYNCED;
+                    } else {
+                        /* Clock is now synced */
 
-                    if (delay != BLINK_RATE_TIME_SYNCED)
-                        ESP_LOGI(TAG, "Time synced: %s", disp_buf);
-                    delay = BLINK_RATE_TIME_SYNCED;
+                        if (delay != BLINK_RATE_TIME_SYNCED)
+                            ESP_LOGI(TAG, "Time synced: %s", disp_buf);
+                        delay = BLINK_RATE_TIME_SYNCED;
+                    }
                 }
             }
-            
-            /* Compute next time to run depending on the desired delay */
-            next_clock_run_time = xTaskGetTickCount() * portTICK_RATE_MS + delay;
         } else {
             sensors_data_t sensors_data;
 

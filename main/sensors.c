@@ -39,11 +39,11 @@
 #define SENSORS_HDC1080
 
 /* Sensors read intervals in seconds */
-#define SENSORS_CO2_READ_INTERVAL        (2 * 60 * 1000)
-#define SENSORS_TEMP_READ_INTERVAL       (10 * 1000)
+#define SENSORS_CO2_READ_INTERVAL        120
+#define SENSORS_TEMP_READ_INTERVAL       10
 
-/* CCS811 baseline saving interval 24h */
-#define SENSORS_CCS811_BASELINE_INTERVAL (24 * 60 * 60 * 1000)
+/* CCS811 baseline saving interval  */
+#define SENSORS_CCS811_BASELINE_INTERVAL (24 * 3600)
 
 #ifdef SENSORS_CCS811
 static ccs811_sensor_t* ccs811_sensor;
@@ -69,53 +69,54 @@ esp_err_t sensors_get_data(sensors_data_t *data)
 
 void sensors_run()
 {
-    uint32_t now;
-    static uint32_t last_temp_read = 0;
-    static uint32_t last_co2_read = 0;
+    static TickType_t tick_count_temp_read = 0;
+    static TickType_t tick_count_co2_read = 0;
 #ifdef SENSORS_CCS811
-    static uint32_t last_baseline_read = 0;
+    static TickType_t tick_count_baseline_read = 0;
 #endif
+    uint32_t time_passed;
 
     if (!sensors_initialized)
         return;
 
-    now = xTaskGetTickCount() * portTICK_RATE_MS;
-
-    if (now - last_temp_read > SENSORS_TEMP_READ_INTERVAL) {
+    /* Time passed since previous temperature read in seconds */
+    time_passed = (xTaskGetTickCount() - tick_count_temp_read) / xPortGetTickRateHz();
+    if (time_passed > SENSORS_TEMP_READ_INTERVAL) {
 #ifdef SENSORS_HDC1080
         /* Read temperature and humidity first */
-        if (hdc1080_read(hdc1080_sensor, &sensors_data->temp, &sensors_data->humidity) != ESP_OK) {
-            /* Set retry time */
-            last_temp_read += SENSORS_TEMP_READ_INTERVAL / 10;
-        } else {
+        if (hdc1080_read(hdc1080_sensor, &sensors_data->temp, &sensors_data->humidity) == ESP_OK) {
             ESP_LOGI(TAG, "Temp %d.%d, Humidity %d",
                 (int)(sensors_data->temp), (int)(sensors_data->temp * 10) % 10,
                 (int)(sensors_data->humidity));
 
-            last_temp_read = now;
+            tick_count_temp_read = xTaskGetTickCount();
+        } else {
+            ESP_LOGE(TAG, "Failed to read temperature!");
         }
 #endif
     }
 
-    if (now - last_co2_read > SENSORS_CO2_READ_INTERVAL) {
+    /* Time passed since previous CO2 read in seconds */
+    time_passed = (xTaskGetTickCount() - tick_count_co2_read) / xPortGetTickRateHz();
+    if (time_passed  > SENSORS_CO2_READ_INTERVAL) {
 #ifdef SENSORS_CCS811
         if (ccs811_get_results (ccs811_sensor, &sensors_data->tvoc, &sensors_data->eco2, NULL, NULL)) {
             ESP_LOGI(TAG, "TVOC %d ppb, eCO2 %d ppm, err 0x%x",
                     sensors_data->tvoc, sensors_data->eco2, ccs811_sensor->error_code);
-            last_co2_read = now;
+            tick_count_co2_read = xTaskGetTickCount();
         } else {
-            /* Set retry time */
-            last_co2_read += SENSORS_CO2_READ_INTERVAL / 10;
+            ESP_LOGE(TAG, "Failed to read eCO2!");
         }
 
         /* CCS811 Temperature and Humidity Compensation */
         ccs811_set_environmental_data(ccs811_sensor, sensors_data->temp, sensors_data->humidity);
 
         /* Save the baseline each 24h */
-        if (now - last_baseline_read > SENSORS_CCS811_BASELINE_INTERVAL) {
+        time_passed = (xTaskGetTickCount() - tick_count_baseline_read) / xPortGetTickRateHz();
+        if (time_passed > SENSORS_CCS811_BASELINE_INTERVAL) {
             uint16_t baseline;
 
-            last_baseline_read = now;
+            tick_count_baseline_read = xTaskGetTickCount();
 
             baseline = ccs811_get_baseline(ccs811_sensor);
             if (baseline) {
