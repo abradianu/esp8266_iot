@@ -302,14 +302,10 @@ static display_mode_t display_buttons_check()
 
             if (ota_start(OTA_SERVER_IP, OTA_SERVER_PORT, OTA_FILENAME,
                 display_ota_progress_cb) == ESP_OK) {
-                send_ota_result(1);
                 ESP_LOGI(TAG, "Rebooting...!");
                 vTaskDelay(100 / portTICK_RATE_MS);
                 esp_restart();
             }
-
-            /* OTA failed if we are here */
-            send_ota_result(0);
         }
     } else {
         ota_btn_press_time = 0;
@@ -395,7 +391,7 @@ static void display_task(void *arg)
                     }
                 }
             }
-        } else {
+        } else {  /* display_mode != DISPLAY_MODE_CLOCK */
             sensors_data_t sensors_data;
 
             if (sensors_get_data(&sensors_data) == ESP_OK) {

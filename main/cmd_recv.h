@@ -101,7 +101,6 @@ typedef enum {
 
 } cmd_number_t;
 
-esp_err_t send_ota_result();
 esp_err_t send_sensors_info();
 esp_err_t send_sys_info();
 esp_err_t cmd_recv_init();

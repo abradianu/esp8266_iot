@@ -222,6 +222,51 @@ static esp_err_t cmd_do_reboot(cJSON *root)
     return ESP_FAIL;
 }
 
+/*
+ * OTA result JSON format:
+ * {
+ *        "cmd":  1,
+ *        "id":   "84f3eb23bcd5",
+ *        "time": 1550306592,
+ *        "res":  1
+ *}
+ */
+
+static esp_err_t send_ota_result(esp_err_t ota_res)
+{
+    cJSON *root = NULL;
+    char * string;
+    esp_err_t ret;
+
+    root = cJSON_CreateObject();
+    if (root == NULL) {
+        ESP_LOGE(TAG, "Could not create JSON object!");
+        return ESP_FAIL;
+    }
+
+    if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, CMD_DO_OTA)           ||
+        !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id) ||
+        !cJSON_AddNumberToObject(root, CMD_JSON_TIME, time(NULL))          ||
+        !cJSON_AddNumberToObject(root, CMD_JSON_RESULT, ota_res)) {
+        ESP_LOGE(TAG, "Could not add sensors info to JSON!");
+
+        cJSON_Delete(root);
+        return ESP_FAIL;
+    }
+
+    string = cJSON_Print(root);
+
+    ret = mqtt_client_publish(mqtt_client_info.ctrl_handle,
+            mqtt_pub_topic, (const uint8_t*)string, strlen(string),
+            MQTT_PUB_QOS, 0);
+
+    /* Free allocated items */
+    cJSON_Delete(root);
+    free(string);
+
+    return ret;
+}
+
 static esp_err_t cmd_do_ota(cJSON *root)
 {
     cJSON * server = NULL;
@@ -381,51 +426,6 @@ static void cmd_recv_task(void *arg)
 }
 
 /*
- * OTA result JSON format:
- * {
- *        "cmd":  1,
- *        "id":   "84f3eb23bcd5",
- *        "time": 1550306592,
- *        "res":  1
- *}
- */
-
-esp_err_t send_ota_result(esp_err_t ota_res)
-{
-    cJSON *root = NULL;
-    char * string;
-    esp_err_t ret;
-
-    root = cJSON_CreateObject();
-    if (root == NULL) {
-        ESP_LOGE(TAG, "Could not create JSON object!");
-        return ESP_FAIL;
-    }
-
-    if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, CMD_DO_OTA)           ||
-        !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id) ||
-        !cJSON_AddNumberToObject(root, CMD_JSON_TIME, time(NULL))          ||
-        !cJSON_AddNumberToObject(root, CMD_JSON_RESULT, ota_res)) {
-        ESP_LOGE(TAG, "Could not add sensors info to JSON!");
-
-        cJSON_Delete(root);
-        return ESP_FAIL;
-    }
-
-    string = cJSON_Print(root);
-
-    ret = mqtt_client_publish(mqtt_client_info.ctrl_handle,
-            mqtt_pub_topic, (const uint8_t*)string, strlen(string),
-            MQTT_PUB_QOS, 0);
-
-    /* Free allocated items */
-    cJSON_Delete(root);
-    free(string);
-
-    return ret;
-}
-
-/*
  * Sensors info JSON format:
  * {
  *        "cmd":  3,
@@ -498,7 +498,7 @@ esp_err_t send_sys_info()
     uint32_t uptime;
     esp_err_t ret;
 
-    /* uptime in seconds */
+    /* uptime in seconds. 100Hz tick rate => 497 days */
     uptime = xTaskGetTickCount() / xPortGetTickRateHz();
 
     root = cJSON_CreateObject();
