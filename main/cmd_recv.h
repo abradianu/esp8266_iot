@@ -30,7 +30,7 @@ extern "C"
 {
 #endif
 
-#define FW_VERSION                "0.1.4"
+#define FW_VERSION                "0.1.5"
 
 typedef enum {
     CMD_DO_REBOOT,
@@ -98,6 +98,18 @@ typedef enum {
      * 
      * Action: Save the new MQTT client name in the flash memory and reboot.
      */
+
+   CMD_SET_MQTT_SERVER_IP,
+    /*
+     * Command JSON format:
+     * {
+     *        "cmd":  4
+     *        "ip"   "192.168.1.140",
+     * }
+     *
+     * Action: Save the new MQTT broker in the flash memory and reboot.
+     */
+
 
 } cmd_number_t;
 

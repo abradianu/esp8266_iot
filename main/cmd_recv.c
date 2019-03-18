@@ -58,9 +58,10 @@
 /* JSON command fields */
 #define CMD_JSON_CMD             "cmd"
 #define CMD_JSON_TIME            "time"
-#define CMD_JSON_CHIP_MAC         "mac"
+#define CMD_JSON_CHIP_MAC        "mac"
 #define CMD_JSON_CLIENT_ID       "id"
 #define CMD_JSON_CLIENT_NAME     "name"
+#define CMD_JSON_BROKER_IP       "ip"
 #define CMD_JSON_RESULT          "res"
 #define CMD_JSON_TEMP            "temp"
 #define CMD_JSON_HUMIDITY        "humidity"
@@ -139,6 +140,7 @@ static void cmd_recv_cb(const uint8_t * data, uint16_t len, bool last)
 static esp_err_t mqtt_start()
 {
     char * sub_topic = NULL;
+    char * broker_ip = MQTT_BROKER;
     nvs_handle nvs = nvs_get_handle();
 
     ESP_LOGI(TAG, "MQTT client start, chip id %s", nvs_get_base_mac());
@@ -146,7 +148,7 @@ static esp_err_t mqtt_start()
     if (nvs) {
         size_t len;
 
-        /* Read MQTT client name from flash */        
+        /* Read MQTT client name from flash */
         if (nvs_get_str(nvs, NVS_MQTT_CLIENT_ID, NULL, &len) == ESP_OK) {
             mqtt_client_id = calloc(1, len + 1);
             if (mqtt_client_id == NULL) {
@@ -156,6 +158,18 @@ static esp_err_t mqtt_start()
             nvs_get_str(nvs, NVS_MQTT_CLIENT_ID, mqtt_client_id, &len);
 
             ESP_LOGI(TAG, "NVS MQTT client id: %s", mqtt_client_id);
+        }
+
+        /* Read server IP from flash */
+        if (nvs_get_str(nvs, NVS_MQTT_BROKER_IP, NULL, &len) == ESP_OK) {
+            broker_ip = calloc(1, len + 1);
+            if (broker_ip == NULL) {
+                goto error;
+            }
+
+            nvs_get_str(nvs, NVS_MQTT_BROKER_IP, broker_ip, &len);
+
+            ESP_LOGI(TAG, "NVS MQTT server IP: %s", broker_ip);
         }
     }
 
@@ -175,7 +189,7 @@ static esp_err_t mqtt_start()
     }
     sprintf(mqtt_pub_topic, "%s%s", MQTT_PUB_TOPIC_PREFIX, mqtt_client_id);
 
-    mqtt_client_info.broker = MQTT_BROKER;
+    mqtt_client_info.broker = broker_ip;
     mqtt_client_info.sub_topic = sub_topic;
     mqtt_client_info.sub_qos = MQTT_SUB_QOS;
     mqtt_client_info.message_received_cb = cmd_recv_cb;
@@ -191,6 +205,7 @@ error:
 
     if (mqtt_client_id != nvs_get_base_mac())
         free(mqtt_client_id);
+    free(broker_ip);
     free(sub_topic);
     free(mqtt_pub_topic);
 
@@ -320,9 +335,34 @@ static esp_err_t cmd_set_mqtt_client_name(cJSON *root)
     ESP_LOGI(TAG, "CMD SET MQTT client name: %s", client_name->valuestring);
 
     /* Save in flash, will be taken into consideration at the next reboot */
-    if (nvs_get_handle()) {        
+    if (nvs_get_handle()) {
         if (nvs_set_str(nvs_get_handle(), NVS_MQTT_CLIENT_ID, client_name->valuestring) != ESP_OK) {
             ESP_LOGI(TAG, "Failed to write the MQTT client name!");
+            return ESP_FAIL;
+        }
+
+        do_reboot();
+    }
+
+    return ESP_FAIL;
+}
+
+static esp_err_t cmd_set_mqtt_broker_ip(cJSON *root)
+{
+    cJSON * broker_ip = NULL;
+
+    broker_ip = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_BROKER_IP);
+    if (broker_ip == NULL || !cJSON_IsString(broker_ip)) {
+        ESP_LOGE(TAG, "Wrong server IP!");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "CMD SET MQTT server IP: %s", broker_ip->valuestring);
+
+    /* Save in flash, will be taken into consideration at the next reboot */
+    if (nvs_get_handle()) {
+        if (nvs_set_str(nvs_get_handle(), NVS_MQTT_BROKER_IP, broker_ip->valuestring) != ESP_OK) {
+            ESP_LOGI(TAG, "Failed to write the MQTT server IP!");
             return ESP_FAIL;
         }
 
@@ -378,6 +418,10 @@ static void cmd_recv(cmd_data_t * cmd)
         }
         case CMD_SET_MQTT_CLIENT_NAME:
             ret = cmd_set_mqtt_client_name(root);
+            break;
+
+        case CMD_SET_MQTT_SERVER_IP:
+            ret = cmd_set_mqtt_broker_ip(root);
             break;
 
         default:

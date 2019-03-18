@@ -32,8 +32,9 @@
 extern "C" {
 #endif
 
-/* Settings saved in the NVS */
+/* Settings saved in the NVS, max key length is currently 15 characters */
 #define NVS_MQTT_CLIENT_ID       "MqttClienId"
+#define NVS_MQTT_BROKER_IP       "MqttBrokerIP"
 #define NVS_DISPLAY_BRIGHTNESS   "Brightness"
 
 #define NVS_WIFI_AP_MODE         "WiFiApMode"
