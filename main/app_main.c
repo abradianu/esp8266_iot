@@ -54,7 +54,7 @@
 #define OTA_FILENAME                   "esp8266_iot.bin"
 
 /* Led is connected to GPIO16 on NodeMcu board */
-#define GPIO_BLUE_LED                 16
+#define GPIO_BLUE_LED                  16
 
 /* OTA button GPIO */
 #define GPIO_OTA_BUTTON                0

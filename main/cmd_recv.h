@@ -103,8 +103,8 @@ typedef enum {
     /*
      * Command JSON format:
      * {
-     *        "cmd":  4
-     *        "ip"   "192.168.1.140",
+     *        "cmd":  5
+     *        "ip"   "192.168.1.135",
      * }
      *
      * Action: Save the new MQTT broker in the flash memory and reboot.

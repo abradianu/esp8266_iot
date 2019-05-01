@@ -46,7 +46,7 @@
 #define CMD_RECV_TASK_STACK       2048
 #define CMD_RECV_TASK_PRIO        10
 
-#define MQTT_BROKER               "192.168.1.140"
+#define MQTT_BROKER               "192.168.1.135"
 #define MQTT_SUB_TOPIC_PREFIX     "sensors/cmd/"
 #define MQTT_SUB_QOS              1
 #define MQTT_PUB_TOPIC_PREFIX     "sensors/data/"
