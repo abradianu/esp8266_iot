@@ -30,15 +30,15 @@ extern "C"
 {
 #endif
 
-#define FW_VERSION                "0.1.5"
+#define FW_VERSION                "0.1.6"
 
 typedef enum {
     CMD_DO_REBOOT,
     /*
      * Command JSON format:
      * {
-     *        "cmd":  0
-     *        "ap"    0,
+     *        "cmd":  0,
+     *        "ap"    0
      * }
      * 
      * Action: Set AP mode and reboot device
@@ -54,7 +54,7 @@ typedef enum {
      *        "file":  "DigitalClock"
      * }
      * 
-     * Action: device performs OTA and publish result
+     * Action: perform OTA and reboot
      */
 
     CMD_GET_SYS_INFO,
@@ -69,7 +69,7 @@ typedef enum {
      *        "time": 1549735713,
      *        "fw_v": "0.0.1"
      *        "heap": 60100,
-     *        "uptime":       120
+     *        "up":   120
      * }
      */
 
@@ -92,8 +92,8 @@ typedef enum {
     /*
      * Command JSON format:
      * {
-     *        "cmd":  4
-     *        "name"  "dormitor",
+     *        "cmd":  4,
+     *        "name"  "dormitor"
      * }
      * 
      * Action: Save the new MQTT client name in the flash memory and reboot.
@@ -103,13 +103,23 @@ typedef enum {
     /*
      * Command JSON format:
      * {
-     *        "cmd":  5
-     *        "ip"   "192.168.1.135",
+     *        "cmd":  5,
+     *        "ip"   "192.168.1.135"
      * }
      *
      * Action: Save the new MQTT broker in the flash memory and reboot.
      */
 
+   CMD_SET_DISPLAY_BRIGHTNESS,
+    /*
+     * Command JSON format:
+     * {
+     *        "cmd":  6,
+     *        "b"     1
+     * }
+     *
+     * Action: Set and save the new brightness level.
+     */
 
 } cmd_number_t;
 

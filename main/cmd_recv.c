@@ -39,6 +39,7 @@
 #include "cJSON.h"
 #include "nvs_utils.h"
 #include "sensors.h"
+#include "display.h"
 
 #include "cmd_recv.h"
 
@@ -73,6 +74,8 @@
 #define CMD_JSON_PORT            "port"
 #define CMD_JSON_FILENAME        "file"
 #define CMD_JSON_AP_MODE         "ap"
+#define CMD_JSON_BRIGHTNESS      "b"
+
 
 /* Delay between MQTT publish attempts */
 #define CMD_MQTT_DELAY_MIN       500
@@ -238,7 +241,7 @@ static esp_err_t cmd_do_reboot(cJSON *root)
 }
 
 /*
- * OTA result JSON format:
+ * CMD result JSON format:
  * {
  *        "cmd":  1,
  *        "id":   "84f3eb23bcd5",
@@ -247,7 +250,7 @@ static esp_err_t cmd_do_reboot(cJSON *root)
  *}
  */
 
-static esp_err_t send_ota_result(esp_err_t ota_res)
+static esp_err_t send_cmd_result(int cmd, esp_err_t res)
 {
     cJSON *root = NULL;
     char * string;
@@ -259,11 +262,12 @@ static esp_err_t send_ota_result(esp_err_t ota_res)
         return ESP_FAIL;
     }
 
-    if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, CMD_DO_OTA)           ||
+    if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, cmd)                  ||
         !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id) ||
         !cJSON_AddNumberToObject(root, CMD_JSON_TIME, time(NULL))          ||
-        !cJSON_AddNumberToObject(root, CMD_JSON_RESULT, ota_res)) {
-        ESP_LOGE(TAG, "Could not add sensors info to JSON!");
+        !cJSON_AddStringToObject(root, CMD_JSON_RESULT,
+                                 res == ESP_OK ? "OK" : "ERROR")) {
+        ESP_LOGE(TAG, "Could not add info to the response JSON!");
 
         cJSON_Delete(root);
         return ESP_FAIL;
@@ -310,14 +314,10 @@ static esp_err_t cmd_do_ota(cJSON *root)
              server->valuestring, port->valueint, file->valuestring);
 
     if (ota_start(server->valuestring, port->valueint, file->valuestring, NULL) == ESP_OK) {
-        send_ota_result(1);
+        send_cmd_result(CMD_DO_OTA, ESP_OK);
 
         do_reboot();
     }
-
-    /* OTA failed if we are here */
-    
-    send_ota_result(0);
 
     return ESP_FAIL;
 }
@@ -340,6 +340,8 @@ static esp_err_t cmd_set_mqtt_client_name(cJSON *root)
             ESP_LOGI(TAG, "Failed to write the MQTT client name!");
             return ESP_FAIL;
         }
+
+        send_cmd_result(CMD_SET_MQTT_CLIENT_NAME, ESP_OK);
 
         do_reboot();
     }
@@ -365,9 +367,36 @@ static esp_err_t cmd_set_mqtt_broker_ip(cJSON *root)
             ESP_LOGI(TAG, "Failed to write the MQTT server IP!");
             return ESP_FAIL;
         }
+        send_cmd_result(CMD_SET_MQTT_SERVER_IP, ESP_OK);
 
         do_reboot();
     }
+
+    return ESP_FAIL;
+}
+
+static esp_err_t cmd_set_display_brightness(cJSON *root)
+{
+    cJSON * brightness = NULL;
+
+    brightness = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_BRIGHTNESS);
+    if (brightness == NULL || !cJSON_IsNumber(brightness)) {
+        ESP_LOGE(TAG, "Wrong brightness level!");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "CMD SET DISPLAY BRIGHTNESS level: %d", brightness->valueint);
+
+    /* Save in flash */
+    if (nvs_get_handle()) {
+        if (nvs_set_u8(nvs_get_handle(), NVS_DISPLAY_BRIGHTNESS, brightness->valueint) != ESP_OK) {
+            ESP_LOGI(TAG, "Failed to write the brightness level!");
+            return ESP_FAIL;
+        }
+    }
+
+    if (display_set_brightness(brightness->valueint) == ESP_OK)
+        return ESP_OK;
 
     return ESP_FAIL;
 }
@@ -397,10 +426,18 @@ static void cmd_recv(cmd_data_t * cmd)
     switch(cmd_nr->valueint) {
         case CMD_DO_REBOOT:
             ret = cmd_do_reboot(root);
+
+            /* Reboot failed if we are here */
+            send_cmd_result(CMD_DO_REBOOT, ESP_FAIL);
+
             break;
 
         case CMD_DO_OTA:
             ret = cmd_do_ota(root);
+
+            /* OTA failed if we are here */
+            send_cmd_result(CMD_DO_OTA, ESP_FAIL);
+
             break;
 
         case CMD_GET_SYS_INFO:
@@ -412,16 +449,33 @@ static void cmd_recv(cmd_data_t * cmd)
             sensors_data_t sensors_data;
 
             ret = ESP_FAIL;
-            if (sensors_get_data(&sensors_data) == ESP_OK)
+            if (sensors_get_data(&sensors_data) == ESP_OK) {
                 ret = send_sensors_info(&sensors_data);
+            }
+
             break;
         }
         case CMD_SET_MQTT_CLIENT_NAME:
             ret = cmd_set_mqtt_client_name(root);
+
+            /* CMD failed if we are here */
+            send_cmd_result(CMD_SET_MQTT_CLIENT_NAME, ESP_FAIL);
+
             break;
 
         case CMD_SET_MQTT_SERVER_IP:
             ret = cmd_set_mqtt_broker_ip(root);
+
+            /* CMD failed if we are here */
+            send_cmd_result(CMD_SET_MQTT_SERVER_IP, ESP_FAIL);
+
+            break;
+
+        case CMD_SET_DISPLAY_BRIGHTNESS:
+            ret = cmd_set_display_brightness(root);
+
+            send_cmd_result(CMD_SET_DISPLAY_BRIGHTNESS, ret);
+
             break;
 
         default:

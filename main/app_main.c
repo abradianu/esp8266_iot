@@ -40,7 +40,7 @@
 
 #include "lwip/apps/sntp.h"
 #include "i2c.h"
-#include "tm1637.h"
+#include "display.h"
 #include "sensors.h"
 #include "cmd_recv.h"
 #include "ota.h"
@@ -77,12 +77,12 @@
 #define I2C_SENSORS_BUS                0
 #define I2C_CLOCK_FREQ                 100000
 
-/* TM1637 GPIO pins*/
-#define GPIO_TM1637_CLK                13
-#define GPIO_TM1637_DATA               12
+/* DISPLAY GPIO pins*/
+#define GPIO_DISPLAY_CLK               13
+#define GPIO_DISPLAY_DATA              12
 
-/* TM1637 clock frequency */
-#define TM1637_CLOCK_FREQ              100000
+/* DISPLAY clock frequency */
+#define DISPLAY_CLOCK_FREQ             100000
 
 /* Display task settings */
 #define DISPLAY_TASK_PRIORITY          10
@@ -154,35 +154,6 @@ static const int CONNECTED_BIT = BIT0;
 static const char *TAG = "DC";
 static wifi_state_t wifi_state;
 
-/* 4-Digits 7 segments display */
-static tm1637_display_t *tm1637_display;
-
-static esp_err_t display_init(void)
-{
-    ESP_LOGI(TAG, "Display init");
-
-    /* Init TM1637, 4 digit 7 Segments display */
-    tm1637_display = tm1637_init(GPIO_TM1637_CLK, GPIO_TM1637_DATA, TM1637_CLOCK_FREQ);
-    if (!tm1637_display) {
-        return ESP_FAIL;
-    }
-
-    return ESP_OK;
-}
-
-static void display_write(char *str)
-{
-    tm1637_write(tm1637_display, str);
-}
-
-static esp_err_t display_set_brightness(uint8_t brightness_level)
-{
-    if (brightness_level > TM1637_MAX_BRIGHTNESS)
-        return ESP_FAIL;
-
-    return tm1637_set_brightness(tm1637_display, brightness_level);
-}
-
 static void sntp_start(void)
 {
     ESP_LOGI(TAG, "SNTP start");
@@ -230,7 +201,7 @@ static esp_err_t event_handler(void *ctx, system_event_t *event)
     return ESP_OK;
 }
 
-void display_ota_progress_cb(uint32_t progress)
+static void display_ota_progress_cb(uint32_t progress)
 {
 #ifdef CLOCK_DISPLAY
     char buf[6];
@@ -570,14 +541,16 @@ void app_main()
     char wifi_pass[24];
 
     /* Init drivers */
-    if (uart_init() != ESP_OK    ||
-        gpio_init() != ESP_OK    ||
-        display_init() != ESP_OK ||
-        nvs_init() != ESP_OK     ||
+    if (uart_init() != ESP_OK         ||
+        gpio_init() != ESP_OK         ||
+        nvs_init() != ESP_OK          ||
         i2c_init(I2C_SENSORS_BUS,
                  GPIO_I2C_MASTER_SCL,
                  GPIO_I2C_MASTER_SDA,
-                 I2C_CLOCK_FREQ) != 0) {
+                 I2C_CLOCK_FREQ) != 0 ||
+        display_init(GPIO_DISPLAY_CLK,
+                     GPIO_DISPLAY_DATA,
+                     DISPLAY_CLOCK_FREQ) != ESP_OK) {
         FATAL_ERROR("Could not init drivers!");
     }
 
