@@ -44,6 +44,7 @@
 #include <stdlib.h>
 
 #include "ccs811.h"
+#include "ccs811_app_fw.h"
 
 #if defined(CCS811_DEBUG_LEVEL_2)
 #define debug(s, f, ...) printf("%s %s: " s "\n", "CCS811", f, ## __VA_ARGS__)
@@ -104,6 +105,14 @@
 #define CCS811_WAKE_ASSERTED_DELAY   50  // Time until active after nWAKE asserted in us
 #define CCS811_WAKE_DEASSERTED_DELAY 20  // Minimum time nWAKE should be de-asserted in us
 
+#define CCS811_SW_RESET_DELAY        100 // SW reset delay in ms
+#define CCS811_APP_ERASE_DELAY       500 // App erase delay in ms
+#define CCS811_APP_WRITE_DELAY       50  // App write delay in ms
+#define CCS811_APP_VERIFY_DELAY      500 // App verify delay in ms
+
+const static uint8_t ccs811_sw_reset[]  = {0x11, 0xe5, 0x72, 0x8a};
+const static uint8_t ccs811_app_erase[] = {0xE7, 0xA7, 0xE6, 0x09};
+
 /**
  * Type declarations
  */
@@ -127,6 +136,7 @@ static bool ccs811_check_error_status (ccs811_sensor_t* dev);
 static bool ccs811_enable_threshold (ccs811_sensor_t* dev, bool enabled);
 static bool ccs811_is_available (ccs811_sensor_t* dev);
 static void ccs811_init_gpio (ccs811_sensor_t* dev);
+static bool ccs811_write_fw (ccs811_sensor_t* dev, const uint8_t * fw, uint32_t size);
 
 ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr, uint8_t wake_gpio)
 {
@@ -154,10 +164,27 @@ ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr, uint8_t wake_gpi
         return NULL;
     }
 
-    const static uint8_t sw_reset[4] = { 0x11, 0xe5, 0x72, 0x8a };
+    // check app version
+    uint8_t app_ver;
+    if (!ccs811_reg_read(dev, CCS811_REG_FW_APP_VER, &app_ver, sizeof(app_ver)))
+    {
+        error_dev("Could not read app version.", __FUNCTION__, dev);
+        free (dev);
+        return NULL;
+    }
+    debug_dev ("App version: %02x", __FUNCTION__, dev, app_ver);
+
+    if (app_ver < CCS811_APP_FW_VER)
+    {
+        //Update to the latest fw
+        debug_dev ("Update fw from %02x to %02x", __FUNCTION__, dev, app_ver, CCS811_APP_FW_VER);
+        if (!ccs811_write_fw(dev, ccs811_app_fw, sizeof(ccs811_app_fw)))
+            error_dev("Firmware upate failed!", __FUNCTION__, dev);
+    }
 
     // doing a software reset first
-    if (!ccs811_reg_write(dev, CCS811_REG_SW_RESET, (uint8_t*)sw_reset, 4))
+    if (!ccs811_reg_write(dev, CCS811_REG_SW_RESET, (uint8_t *)ccs811_sw_reset,
+                          sizeof(ccs811_sw_reset)))
     {
         error_dev("Could not reset the sensor.", __FUNCTION__, dev);
         free (dev);
@@ -167,7 +194,7 @@ ccs811_sensor_t* ccs811_init_sensor (uint8_t bus, uint8_t addr, uint8_t wake_gpi
     uint8_t status;
 
     // wait 100 ms after the reset
-    vTaskDelay(100/portTICK_PERIOD_MS);
+    vTaskDelay(CCS811_SW_RESET_DELAY / portTICK_PERIOD_MS);
 
     // get the status to check whether sensor is in bootloader mode
     if (!ccs811_reg_read(dev, CCS811_REG_STATUS, &status, 1))
@@ -655,24 +682,117 @@ static bool ccs811_is_available (ccs811_sensor_t* dev)
 {
     if (!dev) return false;
 
-    uint8_t reg_data[5];
+    uint8_t hw_id;
         
-    // check hardware id (register 0x20) and hardware version (register 0x21)
-    if (!ccs811_reg_read(dev, CCS811_REG_HW_ID, reg_data, 5))
+    // check hardware id
+    if (!ccs811_reg_read(dev, CCS811_REG_HW_ID, &hw_id, 1))
         return false;
         
-    if (reg_data[0] != 0x81)
+    if (hw_id != 0x81)
     {
-        error_dev ("Wrong hardware ID %02x, should be 0x81", __FUNCTION__, dev, reg_data[0]);
+        error_dev ("Wrong hardware ID %02x, should be 0x81", __FUNCTION__, dev, hw_id);
         dev->error_code = CCS811_DRV_HW_ID;
         return false;
     }
         
-    debug_dev ("hardware version:      %02x", __FUNCTION__, dev, reg_data[1]);
-    debug_dev ("firmware boot version: %02x", __FUNCTION__, dev, reg_data[3]);
-    debug_dev ("firmware app version:  %02x", __FUNCTION__, dev, reg_data[4]);
-        
     return ccs811_check_error_status (dev);
 }
 
+// Flash new firmware
+static bool ccs811_write_fw (ccs811_sensor_t* dev, const uint8_t * fw_data, uint32_t fw_len)
+{
+    uint8_t status;
+    bool ret = false;
+    uint32_t i;
+    uint8_t wake_gpio;
 
+    if (fw_data == NULL || fw_len == 0)
+        return false;
+
+    debug_dev ("Firmware len %d", __FUNCTION__, dev, fw_len);
+
+    ccs811_wake_assert(dev);
+
+    /* Save Wake GPIO */
+    wake_gpio = dev->wake_gpio;
+    /* Prevent further wake GPIO assert */
+    dev->wake_gpio = CCS811_GPIO_INVALID;
+
+    // SW reset
+    if (!ccs811_reg_write(dev, CCS811_REG_SW_RESET, (uint8_t *)ccs811_sw_reset,
+                          sizeof(ccs811_sw_reset)))
+    {
+        error_dev ("SW reset failed!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+    vTaskDelay(CCS811_SW_RESET_DELAY / portTICK_PERIOD_MS);
+
+    // Get the status to check whether sensor is in bootloader mode
+    if (!ccs811_reg_read(dev, CCS811_REG_STATUS, &status, 1))
+    {
+        error_dev("Could not read status register!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+
+    // Check if sensor is in bootloader mode (FW_MODE == 0)
+    if (status & CCS811_STATUS_FW_MODE)
+    {
+        error_dev ("Not in bootloader mode!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+
+    // App erase
+    if (!ccs811_reg_write(dev, CCS811_REG_APP_ERASE, (uint8_t *)ccs811_app_erase,
+                          sizeof(ccs811_app_erase)))
+    {
+        error_dev ("App erase failed!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+    vTaskDelay(CCS811_APP_ERASE_DELAY / portTICK_PERIOD_MS);
+
+    // Copy the FW to flash in 8 bytes chunks. The application binary code length is in multiple of 8 bytes
+    for (i = 0; i < fw_len; i += 8)
+    {
+        if (!ccs811_reg_write(dev, CCS811_REG_APP_DATA, (uint8_t*)fw_data + i, 8))
+        {
+            error_dev("FW write failed!", __FUNCTION__, dev);
+            goto write_fw_end;
+        }
+
+        vTaskDelay(CCS811_APP_WRITE_DELAY / portTICK_PERIOD_MS);
+    }
+
+    // App verify
+    if (!ccs811_reg_write(dev, CCS811_REG_APP_VERIFY, NULL, 0))
+    {
+        error_dev("App verify write failed!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+    vTaskDelay(CCS811_APP_VERIFY_DELAY / portTICK_PERIOD_MS);
+
+    // Check status
+    if (!ccs811_reg_read(dev, CCS811_REG_STATUS, &status, 1))
+    {
+        error_dev("Could not read status register!", __FUNCTION__, dev);
+        goto write_fw_end;
+    }
+
+    // Check if program code valid
+    if (status != 0x30)
+    {
+        error_dev("Wrong status value 0x%x", __FUNCTION__, dev, status);
+        goto write_fw_end;
+    }
+
+    debug_dev ("Firmware update done!", __FUNCTION__, dev);
+    ret = true;
+
+write_fw_end:
+
+    /* Restore Wake GPIO */
+    dev->wake_gpio = wake_gpio;
+
+    ccs811_wake_deassert(dev);
+
+    return ret;
+}

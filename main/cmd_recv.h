@@ -30,7 +30,7 @@ extern "C"
 {
 #endif
 
-#define FW_VERSION                "0.1.7"
+#define FW_VERSION                "0.1.8"
 
 typedef enum {
     CMD_DO_REBOOT,
