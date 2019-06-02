@@ -108,7 +108,7 @@
 #define BRIGHTNESS_BUTTON_PRESS_TIME   800
 
 /* Sensors read interval in ms */
-#define SENSORS_READ_TIME              (5 * 60 * 1000)
+#define SENSORS_READ_TIME              (2 * 60 * 1000)
 
 /*
  * std offset dst [offset],start[/time],end[/time]
