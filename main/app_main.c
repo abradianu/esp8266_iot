@@ -109,6 +109,7 @@
 
 /* Sensors read interval in ms */
 #define SENSORS_READ_TIME              (2 * 60 * 1000)
+#define SENSORS_SEND_RETRY             100
 
 /*
  * std offset dst [offset],start[/time],end[/time]
@@ -390,6 +391,7 @@ static void main_task(void *arg)
 {
     bool init_done = false;
     uint32_t sensors_send_info_time = 0;
+    int send_retry = 0;
 
     if (xTaskCreate(display_task, "display_task", DISPLAY_TASK_STACK_SIZE,
         NULL, DISPLAY_TASK_PRIORITY, NULL) != pdPASS) {
@@ -430,6 +432,14 @@ static void main_task(void *arg)
 
                 /* Set retry interval to 1/10 of sensor read time. For 10min will retry in 1min */
                 sensors_send_info_time = (SENSORS_READ_TIME * 9) / 10;
+                send_retry ++;
+
+                /* Reboot if we tried too many times */
+                if (send_retry > SENSORS_SEND_RETRY) {
+                    FATAL_ERROR("Too many send errors!");
+                }
+            } else {
+                send_retry = 0;
             }
         }
     }
