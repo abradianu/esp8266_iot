@@ -75,6 +75,7 @@
 #define CMD_JSON_FILENAME        "file"
 #define CMD_JSON_AP_MODE         "ap"
 #define CMD_JSON_BRIGHTNESS      "b"
+#define CMD_JSON_CCS811_BASELINE "baseline"
 
 
 /* Delay between MQTT publish attempts */
@@ -401,6 +402,33 @@ static esp_err_t cmd_set_display_brightness(cJSON *root)
     return ESP_FAIL;
 }
 
+static esp_err_t cmd_set_ccs811_baseline(cJSON *root)
+{
+    cJSON * baseline = NULL;
+
+    baseline = cJSON_GetObjectItemCaseSensitive(root, CMD_JSON_CCS811_BASELINE);
+    if (baseline == NULL || !cJSON_IsNumber(baseline)) {
+        ESP_LOGE(TAG, "Wrong baseline level!");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "CMD SET CCS811 baseline: 0x%x", baseline->valueint);
+
+    /* Save new baseline in flash */
+    if (nvs_get_handle()) {
+        if (nvs_set_u16(nvs_get_handle(), NVS_CCS811_BASELINE, baseline->valueint) != ESP_OK) {
+            ESP_LOGI(TAG, "Failed to write the CCS811 baseline!");
+            return ESP_FAIL;
+        }
+    }
+
+    send_cmd_result(CMD_SET_CCS811_BASELINE, ESP_OK);
+
+    do_reboot();
+
+    return ESP_FAIL;
+}
+
 static void cmd_recv(cmd_data_t * cmd)
 {
     cJSON *root = NULL;
@@ -475,6 +503,13 @@ static void cmd_recv(cmd_data_t * cmd)
             ret = cmd_set_display_brightness(root);
 
             send_cmd_result(CMD_SET_DISPLAY_BRIGHTNESS, ret);
+
+            break;
+
+        case CMD_SET_CCS811_BASELINE:
+            ret = cmd_set_ccs811_baseline(root);
+
+            send_cmd_result(CMD_SET_CCS811_BASELINE, ret);
 
             break;
 
@@ -595,6 +630,7 @@ esp_err_t send_sys_info()
     char * string;
     uint32_t uptime;
     esp_err_t ret;
+    uint16_t baseline = 0;
 
     /* uptime in seconds. 100Hz tick rate => 497 days */
     uptime = xTaskGetTickCount() / xPortGetTickRateHz();
@@ -605,9 +641,12 @@ esp_err_t send_sys_info()
         return ESP_FAIL;
     }
 
+    nvs_get_u16(nvs_get_handle(), NVS_CCS811_BASELINE, &baseline);
+
     if (!cJSON_AddNumberToObject(root, CMD_JSON_CMD, CMD_GET_SYS_INFO)          ||
         !cJSON_AddStringToObject(root, CMD_JSON_CLIENT_ID, mqtt_client_id)      ||
         !cJSON_AddStringToObject(root, CMD_JSON_CHIP_MAC, nvs_get_base_mac())   ||
+        !cJSON_AddNumberToObject(root, CMD_JSON_CCS811_BASELINE, baseline)      ||
         !cJSON_AddNumberToObject(root, CMD_JSON_TIME, time(NULL))               ||
         !cJSON_AddStringToObject(root, CMD_JSON_FW_VER, FW_VERSION)             ||
         !cJSON_AddNumberToObject(root, CMD_JSON_HEAP, esp_get_free_heap_size()) ||

@@ -136,6 +136,11 @@ void sensors_run()
 esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
 {
 #ifdef SENSORS_CCS811
+    uint16_t baseline;
+
+    nvs_get_u16(nvs_get_handle(), NVS_CCS811_BASELINE, &baseline);
+    ESP_LOGI(TAG, "CCS811 flash baseline 0x%x!", baseline);
+
     /* longer clock stretching is required for CCS811 */
     i2c_set_clock_stretch (i2c_bus, CCS811_I2C_CLOCK_STRETCH);
 
@@ -144,8 +149,6 @@ esp_err_t sensors_init(uint8_t i2c_bus, uint8_t wake_gpio)
                                        CCS811_I2C_ADDRESS_1,
                                        wake_gpio);
     if (ccs811_sensor) {
-        uint16_t baseline;
-
         /* Set the baseline saved in flash if any */
         if (nvs_get_u16(nvs_get_handle(), NVS_CCS811_BASELINE, &baseline) == ESP_OK &&
             ccs811_set_baseline(ccs811_sensor, baseline)) {

@@ -66,6 +66,7 @@ typedef enum {
      *        "cmd":  2,
      *        "id":   "84f3eb23bcd5",
      *        "mac":  "010203040506"
+     *        "baseline":0xf949
      *        "time": 1549735713,
      *        "fw_v": "0.0.1"
      *        "heap": 60100,
@@ -121,6 +122,16 @@ typedef enum {
      * Action: Set and save the new brightness level.
      */
 
+   CMD_SET_CCS811_BASELINE,
+    /*
+     * Command JSON format:
+     * {
+     *        "cmd":  7,
+     *        "baseline"     1234
+     * }
+     *
+     * Action: Set and save the new CCS811 baseline.
+     */
 } cmd_number_t;
 
 esp_err_t send_sensors_info();
